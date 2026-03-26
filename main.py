@@ -41,6 +41,14 @@ class CheckResult:
     details: str
 
 
+def log(message: str, *, err: bool = False) -> None:
+    stream = sys.stderr if err else sys.stdout
+    timestamp = datetime.now(UTC).isoformat(timespec="seconds")
+    lines = message.splitlines() or [""]
+    for line in lines:
+        print(f"[{timestamp}] {line}", file=stream)
+
+
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
@@ -185,7 +193,7 @@ def main() -> int:
     try:
         smtp_config = load_smtp_config()
     except Exception as exc:
-        print(f"Configuration error: {exc}", file=sys.stderr)
+        log(f"Configuration error: {exc}", err=True)
         return 2
 
     try:
@@ -199,7 +207,7 @@ def main() -> int:
         )
 
     if result.is_healthy:
-        print(
+        log(
             f"healthy: {CHECK_URL} -> {result.final_url} "
             f"(status={result.status_code})"
         )
@@ -209,15 +217,15 @@ def main() -> int:
     try:
         send_alert_email(smtp_config, message)
     except Exception as exc:
-        print("Redirect check failed and alert email could not be sent.", file=sys.stderr)
-        print(result.details, file=sys.stderr)
-        print(f"Email error: {exc!r}", file=sys.stderr)
+        log("Redirect check failed and alert email could not be sent.", err=True)
+        log(result.details, err=True)
+        log(f"Email error: {exc!r}", err=True)
         return 2
 
-    print("Alert email sent.")
-    print(result.details)
+    log("Alert email sent.")
+    log(result.details)
     return 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit() #(main())
