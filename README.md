@@ -2,7 +2,7 @@
 
 Tiny monitor for `https://unlockburritoday.com`.
 
-It runs every 5 minutes, follows redirects, and emails:
+It runs every 1 minute, follows redirects, and emails:
 
 - `williamfeng1729@gmail.com`
 - `calvinrodrigue@gmail.com`
@@ -13,7 +13,8 @@ if the final destination is not `chipotle.com` or a `chipotle.com` subdomain.
 
 - Uses `requests` to `GET https://unlockburritoday.com`
 - Treats the check as healthy only if the final hostname is `chipotle.com` or something like `www.chipotle.com`
-- Sends one email to both recipients on every failed cron run
+- Sends one email to both recipients only when the request resolves and the final destination is wrong
+- Skips email alerts for request failures such as DNS issues, connection errors, or timeouts
 - Does not retry within a run
 - Does not send recovery emails
 
@@ -23,17 +24,9 @@ Exit codes:
 - `1`: unhealthy, alert email sent
 - `2`: configuration error or alert email failure
 
-## SMTP prerequisite
+## Gmail prerequisite
 
-`wfeng.dev` already has Cloudflare Email Routing for inbound mail. That does not provide outbound SMTP.
-
-Before using `ALERT_FROM=noreply@wrapd.wfeng.dev`, provision an SMTP-capable outbound mail service for that domain and collect:
-
-- SMTP host
-- SMTP port
-- SMTP username
-- SMTP password
-- SMTP security mode: `starttls` or `ssl`
+Create a Google app password for the Gmail account you want to send from, then store the Gmail address and app password in `.env`.
 
 ## Setup
 
@@ -53,12 +46,8 @@ uv run python main.py
 ## Environment variables
 
 ```dotenv
-SMTP_HOST=smtp.your-provider.example
-SMTP_PORT=587
-SMTP_USERNAME=noreply@wrapd.wfeng.dev
-SMTP_PASSWORD=replace-me
-SMTP_SECURITY=starttls
-ALERT_FROM=noreply@wrapd.wfeng.dev
+GOOGLE_EMAIL=your-gmail-address@gmail.com
+GOOGLE_APP_PASSWORD=replace-me
 ```
 
 ## Remote deploy
@@ -82,5 +71,5 @@ mkdir -p /home/willi/unlock-burrito-day-notifier/logs
 Install this cron entry:
 
 ```cron
-*/5 * * * * cd /home/willi/unlock-burrito-day-notifier && /usr/bin/uv run python main.py >> /home/willi/unlock-burrito-day-notifier/logs/monitor.log 2>&1
+* * * * * cd /home/willi/unlock-burrito-day-notifier && /usr/bin/uv run python main.py >> /home/willi/unlock-burrito-day-notifier/logs/monitor.log 2>&1
 ```
