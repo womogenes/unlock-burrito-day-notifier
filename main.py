@@ -24,18 +24,15 @@ ENV_PATH = PROJECT_DIR / ".env"
 
 
 @dataclass(frozen=True)
-class SmtpConfig:
-    host: str
-    port: int
-    username: str
-    password: str
-    security: str
-    alert_from: str
+class GmailConfig:
+    email: str
+    app_password: str
 
 
 @dataclass(frozen=True)
 class CheckResult:
     is_healthy: bool
+    did_resolve: bool
     status_code: int | None
     final_url: str | None
     details: str
@@ -71,40 +68,24 @@ def load_env_file(path: Path) -> None:
         os.environ.setdefault(key, value)
 
 
-def load_smtp_config() -> SmtpConfig:
-    load_env_file(ENV_PATH)
+def load_gmail_config() -> GmailConfig:
+    if not (
+        os.environ.get("GOOGLE_EMAIL")
+        and os.environ.get("GOOGLE_APP_PASSWORD")
+    ):
+        load_env_file(ENV_PATH)
 
     missing_keys = [
         key
-        for key in (
-            "SMTP_HOST",
-            "SMTP_PORT",
-            "SMTP_USERNAME",
-            "SMTP_PASSWORD",
-            "SMTP_SECURITY",
-            "ALERT_FROM",
-        )
+        for key in ("GOOGLE_EMAIL", "GOOGLE_APP_PASSWORD")
         if not os.environ.get(key)
     ]
     if missing_keys:
         raise ValueError(f"Missing required environment variables: {', '.join(missing_keys)}")
 
-    security = os.environ["SMTP_SECURITY"].strip().lower()
-    if security not in {"starttls", "ssl"}:
-        raise ValueError("SMTP_SECURITY must be 'starttls' or 'ssl'")
-
-    try:
-        port = int(os.environ["SMTP_PORT"])
-    except ValueError as exc:
-        raise ValueError("SMTP_PORT must be an integer") from exc
-
-    return SmtpConfig(
-        host=os.environ["SMTP_HOST"].strip(),
-        port=port,
-        username=os.environ["SMTP_USERNAME"].strip(),
-        password=os.environ["SMTP_PASSWORD"],
-        security=security,
-        alert_from=os.environ["ALERT_FROM"].strip(),
+    return GmailConfig(
+        email=os.environ["GOOGLE_EMAIL"].strip(),
+        app_password=os.environ["GOOGLE_APP_PASSWORD"],
     )
 
 
@@ -134,6 +115,7 @@ def check_redirect() -> CheckResult:
     if is_expected_host(final_hostname):
         return CheckResult(
             is_healthy=True,
+            did_resolve=True,
             status_code=response.status_code,
             final_url=response.url,
             details=history_text,
@@ -146,6 +128,7 @@ def check_redirect() -> CheckResult:
     )
     return CheckResult(
         is_healthy=False,
+        did_resolve=True,
         status_code=response.status_code,
         final_url=response.url,
         details=details,
@@ -174,24 +157,15 @@ def build_alert_message(result: CheckResult, alert_from: str) -> EmailMessage:
     return message
 
 
-def send_alert_email(config: SmtpConfig, message: EmailMessage) -> None:
-    if config.security == "ssl":
-        with smtplib.SMTP_SSL(config.host, config.port, timeout=30) as server:
-            server.login(config.username, config.password)
-            server.send_message(message)
-        return
-
-    with smtplib.SMTP(config.host, config.port, timeout=30) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(config.username, config.password)
+def send_alert_email(config: GmailConfig, message: EmailMessage) -> None:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
+        server.login(config.email, config.app_password)
         server.send_message(message)
 
 
 def main() -> int:
     try:
-        smtp_config = load_smtp_config()
+        gmail_config = load_gmail_config()
     except Exception as exc:
         log(f"Configuration error: {exc}", err=True)
         return 2
@@ -201,6 +175,7 @@ def main() -> int:
     except Exception as exc:
         result = CheckResult(
             is_healthy=False,
+            did_resolve=False,
             status_code=None,
             final_url=None,
             details=f"Request failed with exception: {exc!r}",
@@ -213,9 +188,13 @@ def main() -> int:
         )
         return 0
 
-    message = build_alert_message(result, smtp_config.alert_from)
+    if not result.did_resolve:
+        print(f"skipping alert: {result.details}")
+        return 0
+
+    message = build_alert_message(result, gmail_config.email)
     try:
-        send_alert_email(smtp_config, message)
+        send_alert_email(gmail_config, message)
     except Exception as exc:
         log("Redirect check failed and alert email could not be sent.", err=True)
         log(result.details, err=True)
